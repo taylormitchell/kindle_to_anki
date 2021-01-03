@@ -15,12 +15,20 @@ class MyClippings(list):
         lines = clip_str.split("\n")
 
         title = lines[0]
-        passage = lines[3]
+
+        m = re.search("Your (\w+)", lines[1])
+        type = m.groups()[0]
+        if type == "Highlight":
+            quote = lines[3]
+            note = ""
+        else:
+            quote = ""
+            note = lines[3]
 
         m = re.search("page (\d+)", lines[1])
         page = m.groups()[0] if m else UNKNOWN
 
-        m = re.search("Location (\d+-\d+)", lines[1])
+        m = re.search("Location ([\d-]+)", lines[1])
         loc = m.groups()[0] if m else UNKNOWN
 
         date = UNKNOWN
@@ -29,7 +37,7 @@ class MyClippings(list):
             date = datetime.datetime.strptime(m.groups()[0], "%A, %B %d, %Y %I:%M:%S %p")
             timestamp = int(date.timestamp())
             
-        return Clipping(title, passage, page, loc, timestamp)
+        return Clipping(title, quote, note, page, loc, timestamp)
         
     @classmethod
     def from_filepath(cls, filepath):
@@ -43,19 +51,53 @@ class MyClippings(list):
         
         
 class Clipping:
-    def __init__(self, title, passage, page, location, added_on):
+    def __init__(self, title, quote, note, page, location, added_on):
         self.title = title
-        self.passage = passage
+        self.quote = quote
+        self.note = note
         self.page = page
         self.location = location
         self.added_on = added_on
 
 
-def clipping_to_anki_fields(clipping):
-    fields = {k:str(v) for k,v in clipping.__dict__.items()}
-    fields["passage_and_title"] = clipping.passage + clipping.title
-    return fields
+def is_pair(highlight, note):
+    highlight_loc_end = highlight.location.split("-")[-1]
+    return (highlight.title==note.title) and (highlight_loc_end == note.location)
+
+
+def consolidate(clippings):
+    clips_consolidated = []
+    i = 0
+    while i < len(clippings):
+        clip, next_clip = clippings[i], clippings[i+1]
+        if next_clip.note and is_pair(clip, next_clip):
+            clip.note = next_clip.note
+            i += 1
+        clips_consolidated.append(clip)
+        i += 1
+    return clips_consolidated
+
+
+#def clipping_to_anki_fields(clipping):
+#    fields = {k:str(v) for k,v in clipping.__dict__.items()}
+#    fields["passage_and_title"] = clipping.passage + clipping.title
+#    return fields
         
+
+def add_clipping(clipping, deck):
+    if clipping.quote:
+        fields = {k:str(v) for k,v in clipping.__dict__.items()}
+        fields["quote_and_title"] = clipping.quote + clipping.title
+        model = "Kindle Highlight"
+    else:
+        fields = {k:str(v) for k,v in clipping.__dict__.items()}
+        fields["note_and_title"] = clipping.note + clipping.title
+        model = "Kindle Note"
+    try:
+        anki.add_note(deck, model, fields=fields)
+    except anki.DuplicateError as e:
+        print(e)
+
 
 if __name__=="__main__":
 
@@ -68,12 +110,10 @@ if __name__=="__main__":
     my_clippings = MyClippings.from_filepath(filepath_new)
 
     last_clipping_ankified = my_clippings_old.latest_clipping()
-    for clipping in my_clippings:
-        if clipping.added_on > last_clipping_ankified:
-            print(f"Adding '{clipping.passage}'")
-            try:
-                res = anki.add_note(deck, model, fields=clipping_to_anki_fields(clipping))
-            except anki.DuplicateError as e:
-                print(e)
+    clips_to_add = [clip for clip in my_clippings if clip.added_on > last_clipping_ankified]
+    clips_to_add = consolidate(clips_to_add)
+    for clipping in clips_to_add:
+        print(f"Adding '{clipping.quote or clipping.note}'")
+        add_clipping(clipping, deck=deck)
 
     shutil.copyfile(filepath_new, filepath_old)
