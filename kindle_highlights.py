@@ -68,7 +68,7 @@ def is_pair(highlight, note):
 def consolidate(clippings):
     clips_consolidated = []
     i = 0
-    while i < len(clippings):
+    while i < (len(clippings)-1):
         clip, next_clip = clippings[i], clippings[i+1]
         if next_clip.note and is_pair(clip, next_clip):
             clip.note = next_clip.note
